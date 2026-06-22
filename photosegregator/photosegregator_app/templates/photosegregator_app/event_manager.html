@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PhotoFind Event Manager</title>
+  {% load static %}
+  <link rel="stylesheet" href="{% static 'photosegregator_app/css/style.css' %}" />
+  <style>
+    .event-form {
+      max-width: 400px;
+      margin: 40px auto;
+    }
+    
+    .form-group {
+      margin-bottom: 20px;
+    }
+    
+    .form-group label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+      color: var(--text);
+      font-size: 14px;
+    }
+    
+    .form-group input {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg-card);
+      color: var(--text);
+      font-size: 14px;
+      font-family: inherit;
+    }
+    
+    .form-group input:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+    
+    .form-group input::placeholder {
+      color: var(--text-muted);
+    }
+    
+    .generate-btn {
+      width: 100%;
+      padding: 12px;
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      font-family: inherit;
+    }
+    
+    .generate-btn:hover:not(:disabled) {
+      background: #4a5de8;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 20px var(--accent-glow);
+    }
+    
+    .generate-btn:disabled {
+      opacity: 0.5;
+      pointer-events: none;
+    }
+    
+    .events-list {
+      max-width: 600px;
+      margin: 40px auto;
+    }
+    
+    .event-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+    }
+    
+    .event-info h3 {
+      margin-bottom: 4px;
+      font-size: 16px;
+    }
+    
+    .event-info p {
+      color: var(--text-muted);
+      font-size: 13px;
+      margin: 2px 0;
+    }
+    
+    .event-actions {
+      display: flex;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+
+  <header class="header">
+    <div class="header-inner">
+      <div class="logo">
+        <span class="logo-icon">◈</span>
+        <span class="logo-text">PhotoFind</span>
+      </div>
+      <p class="header-tagline">Event Manager — Create & Share Event Links</p>
+    </div>
+  </header>
+
+  <main class="main">
+
+    <!-- Create Event Form -->
+    <section class="card event-form" id="create-form">
+      <div class="step-badge">Step 1</div>
+      <h2 class="card-title">Create Event</h2>
+      <p class="card-desc">Generate a shareable link for your event</p>
+
+      <div class="form-group">
+        <label for="manager-name">Your Name</label>
+        <input 
+          type="text" 
+          id="manager-name" 
+          placeholder="e.g., Amit Sharma"
+          autocomplete="off"
+        />
+      </div>
+
+      <div class="form-group">
+        <label for="event-name">Event Name</label>
+        <input 
+          type="text" 
+          id="event-name" 
+          placeholder="e.g., Sharma Wedding 2024"
+          autocomplete="off"
+        />
+      </div>
+
+      <button class="generate-btn" id="generate-btn" type="button">
+        ✨ Generate Link
+      </button>
+    </section>
+
+  </main>
+
+  <div class="toast hidden" id="toast"></div>
+
+  <script>
+    console.log("Event Manager Page Loaded");
+
+    const generateBtn = document.getElementById("generate-btn");
+    const managerNameInput = document.getElementById("manager-name");
+    const eventNameInput = document.getElementById("event-name");
+    const toast = document.getElementById("toast");
+
+    function showToast(msg, duration = 3000) {
+      console.log("Toast:", msg);
+      toast.textContent = msg;
+      toast.classList.remove("hidden");
+      // Force reflow
+      toast.offsetHeight;
+      toast.classList.add("show");
+      setTimeout(() => {
+        toast.classList.remove("show");
+        setTimeout(() => toast.classList.add("hidden"), 300);
+      }, duration);
+    }
+
+    function createEvent() {
+      console.log("createEvent() called");
+      
+      const managerName = managerNameInput.value.trim();
+      const eventName = eventNameInput.value.trim();
+
+      console.log("Manager:", managerName, "Event:", eventName);
+
+      if (!managerName || !eventName) {
+        console.error("Missing fields");
+        showToast("❌ Please fill in all fields");
+        return;
+      }
+
+      generateBtn.disabled = true;
+      showToast("⏳ Creating event...");
+
+      const payload = {
+        manager_name: managerName,
+        event_name: eventName
+      };
+
+      console.log("Sending payload:", payload);
+
+      fetch("/api/event/create/", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": getCookie("csrftoken")
+        },
+        body: JSON.stringify(payload)
+      })
+      .then(response => {
+        console.log("Response status:", response.status);
+        return response.json();
+      })
+      .then(data => {
+        console.log("Response data:", data);
+
+        if (data.success) {
+          showToast("✅ Event created!");
+          
+          // Reset form
+          managerNameInput.value = "";
+          eventNameInput.value = "";
+          
+          // Redirect to event details page
+          setTimeout(() => {
+            window.location.href = `/event/${data.event_code}/details/`;
+          }, 1000);
+        } else {
+          showToast("❌ Error: " + (data.error || "Unknown error"));
+          generateBtn.disabled = false;
+        }
+      })
+      .catch(err => {
+        console.error("Fetch error:", err);
+        showToast("❌ Network error: " + err.message);
+        generateBtn.disabled = false;
+      });
+    }
+
+    // Get CSRF token from cookie
+    function getCookie(name) {
+      let cookieValue = null;
+      if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+          const cookie = cookies[i].trim();
+          if (cookie.substring(0, name.length + 1) === (name + '=')) {
+            cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+            break;
+          }
+        }
+      }
+      return cookieValue;
+    }
+
+    // Attach click handler
+    generateBtn.addEventListener("click", createEvent);
+
+    // Allow Enter key
+    eventNameInput.addEventListener("keypress", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        createEvent();
+      }
+    });
+
+    managerNameInput.addEventListener("keypress", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        eventNameInput.focus();
+      }
+    });
+
+    console.log("Event listeners attached");
+  </script>
+</body>
+</html>

@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PhotoFind — Find Your Event Photos</title>
+  {% load static %}
+  <link rel="stylesheet" href="{% static 'photosegregator_app/css/style.css' %}" />
+</head>
+<body>
+
+  <!-- ── HEADER ─────────────────────────────────── -->
+  <header class="header">
+    <div class="header-inner">
+      <div class="logo">
+        <span class="logo-icon">◈</span>
+        <span class="logo-text">PhotoFind</span>
+      </div>
+      <p class="header-tagline">{{ event.event_name }}</p>
+    </div>
+  </header>
+
+  <!-- ── MAIN ──────────────────────────────────── -->
+  <main class="main">
+
+    <!-- STEP 1: Upload selfie -->
+    <section class="card upload-card" id="step-upload">
+      <div class="step-badge">Step 1</div>
+      <h2 class="card-title">Upload Your Selfie</h2>
+      <p class="card-desc">
+        Take a selfie right now or upload a photo of yourself from this event.
+        We'll scan the gallery and find all your photos!
+      </p>
+
+      <div class="upload-zone" id="upload-zone">
+        <div class="upload-zone-inner" id="upload-zone-inner">
+          <div class="upload-icon-wrap">
+            <svg class="upload-icon" viewBox="0 0 48 48" fill="none">
+              <circle cx="24" cy="24" r="23" stroke="currentColor" stroke-width="2"/>
+              <path d="M24 14v14M17 21l7-7 7 7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M14 34h20" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <p class="upload-hint">Drag & drop your selfie here</p>
+          <p class="upload-hint-sub">or</p>
+          <label class="btn btn-outline" for="selfie-input">Browse Photo</label>
+          <input type="file" id="selfie-input" accept="image/*" hidden />
+        </div>
+
+        <!-- Preview (shown after selection) -->
+        <div class="preview-wrap hidden" id="preview-wrap">
+          <img id="selfie-preview" src="" alt="Your selfie preview" class="selfie-preview" />
+          <div class="preview-actions">
+            <button class="btn btn-ghost" id="change-photo-btn">Change Photo</button>
+            <button class="btn btn-primary" id="find-btn">
+              <span class="btn-text">Find My Photos</span>
+              <span class="btn-icon">→</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- LOADING STATE -->
+    <section class="card loading-card hidden" id="step-loading">
+      <div class="loading-anim">
+        <div class="pulse-ring"></div>
+        <div class="pulse-ring delay-1"></div>
+        <div class="pulse-ring delay-2"></div>
+        <div class="loading-face-icon">◈</div>
+      </div>
+      <h2 class="card-title">Scanning Gallery…</h2>
+      <p class="card-desc" id="loading-message">Finding your face in the photos.</p>
+      <div class="progress-bar-wrap">
+        <div class="progress-bar" id="progress-bar"></div>
+      </div>
+    </section>
+
+    <!-- RESULTS -->
+    <section class="card results-card hidden" id="step-results">
+      <div class="results-header">
+        <div>
+          <div class="step-badge">Step 2</div>
+          <h2 class="card-title" id="results-title">Your Photos Found!</h2>
+          <p class="card-desc" id="results-desc"></p>
+        </div>
+        <div class="results-actions-top">
+          <button class="btn btn-ghost" id="search-again-btn">↩ Search Again</button>
+          <button class="btn btn-primary" id="download-all-btn">
+            ↓ Download All
+          </button>
+        </div>
+      </div>
+
+      <!-- Confidence badge -->
+      <div class="confidence-strip" id="confidence-strip">
+        <span class="conf-label">Match Quality</span>
+        <div class="conf-bar-wrap">
+          <div class="conf-bar" id="conf-bar"></div>
+        </div>
+        <span class="conf-value" id="conf-value"></span>
+      </div>
+
+      <!-- Photo grid -->
+      <div class="photo-grid" id="photo-grid">
+        <!-- populated by JS -->
+      </div>
+    </section>
+
+    <!-- NO MATCH -->
+    <section class="card no-match-card hidden" id="step-no-match">
+      <div class="no-match-icon">🔍</div>
+      <h2 class="card-title">No Photos Found</h2>
+      <p class="card-desc">
+        We couldn't find any photos of you in the gallery. 
+        You might not be in the uploaded photos yet, or try a clearer photo.
+      </p>
+      <button class="btn btn-outline" id="try-again-btn">Try Another Photo</button>
+    </section>
+
+    <!-- ERROR -->
+    <section class="card error-card hidden" id="step-error">
+      <div class="error-icon">⚠</div>
+      <h2 class="card-title">Something Went Wrong</h2>
+      <p class="card-desc" id="error-message"></p>
+      <button class="btn btn-outline" id="error-retry-btn">Try Again</button>
+    </section>
+
+  </main>
+
+  <!-- ── LIGHTBOX ───────────────────────────────── -->
+  <div class="lightbox hidden" id="lightbox">
+    <div class="lightbox-backdrop" id="lightbox-backdrop"></div>
+    <div class="lightbox-content">
+      <button class="lightbox-close" id="lightbox-close">✕</button>
+      <img id="lightbox-img" src="" alt="Full size photo" />
+      <div class="lightbox-footer">
+        <span id="lightbox-filename"></span>
+        <button class="btn btn-primary btn-sm" id="lightbox-download">↓ Download</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TOAST ──────────────────────────────────── -->
+  <div class="toast hidden" id="toast"></div>
+
+  <script>
+    /* ──────────────────────────────────────────────────────────────
+       EVENT-AWARE APP.JS
+       Modified for event-based photo finding
+       ────────────────────────────────────────────────────────────── */
+
+    const eventCode = "{{ event.event_code }}";
+
+    // ── DOM refs ─────────────────────────────────────────────────────
+    const uploadZone      = document.getElementById("upload-zone");
+    const uploadZoneInner = document.getElementById("upload-zone-inner");
+    const selfieInput     = document.getElementById("selfie-input");
+    const previewWrap     = document.getElementById("preview-wrap");
+    const selfiePreview   = document.getElementById("selfie-preview");
+    const changePhotoBtn  = document.getElementById("change-photo-btn");
+    const findBtn         = document.getElementById("find-btn");
+
+    const stepUpload      = document.getElementById("step-upload");
+    const stepLoading     = document.getElementById("step-loading");
+    const stepResults     = document.getElementById("step-results");
+    const stepNoMatch     = document.getElementById("step-no-match");
+    const stepError       = document.getElementById("step-error");
+
+    const loadingMessage  = document.getElementById("loading-message");
+    const resultsTitle    = document.getElementById("results-title");
+    const resultsDesc     = document.getElementById("results-desc");
+    const downloadAllBtn  = document.getElementById("download-all-btn");
+    const searchAgainBtn  = document.getElementById("search-again-btn");
+    const photoGrid       = document.getElementById("photo-grid");
+    const confBar         = document.getElementById("conf-bar");
+    const confValue       = document.getElementById("conf-value");
+
+    const tryAgainBtn     = document.getElementById("try-again-btn");
+    const errorRetryBtn   = document.getElementById("error-retry-btn");
+    const errorMessage    = document.getElementById("error-message");
+
+    const lightbox        = document.getElementById("lightbox");
+    const lightboxImg     = document.getElementById("lightbox-img");
+    const lightboxClose   = document.getElementById("lightbox-close");
+    const lightboxBg      = document.getElementById("lightbox-backdrop");
+    const lightboxDl      = document.getElementById("lightbox-download");
+    const lightboxFname   = document.getElementById("lightbox-filename");
+
+    const toast           = document.getElementById("toast");
+
+    // // ── State ─────────────────────────────────────────────────────────
+    // let selectedFile     = null;
+    // let matchedPhotos    = [];
+    // let toastTimer       = null;
+
+    // // ── SECTIONS ─────────────────────────────────────────────────────
+    // const ALL_STEPS = [stepUpload, stepLoading, stepResults, stepNoMatch, stepError];
+
+    // function showStep(step) {
+    //   ALL_STEPS.forEach(s => s.classList.add("hidden"));
+    //   step.classList.remove("hidden");
+    // }
+
+    // // ── TOAST ─────────────────────────────────────────────────────────
+    // function showToast(msg, duration = 3000) {
+    //   toast.textContent = msg;
+    //   toast.classList.remove("hidden");
+    //   toast.offsetHeight;
+    //   toast.classList.add("show");
+    //   clearTimeout(toastTimer);
+    //   toastTimer = setTimeout(() => {
+    //     toast.classList.remove("show");
+    //     setTimeout(() => toast.classList.add("hidden"), 300);
+    //   }, duration);
+    // }
+
+    // // ── FILE SELECTION ────────────────────────────────────────────────
+    // function handleFileSelected(file) {
+    //   if (!file) return;
+    //   const allowed = ["image/jpeg", "image/png", "image/webp", "image/bmp"];
+    //   if (!allowed.includes(file.type)) {
+    //     showToast("❌ Please upload a JPG, PNG, WebP, or BMP image.");
+    //     return;
+    //   }
+    //   if (file.size > 15 * 1024 * 1024) {
+    //     showToast("❌ File too large. Max 15 MB.");
+    //     return;
+    //   }
+
+    //   selectedFile = file;
+    //   const reader = new FileReader();
+    //   reader.onload = (e) => {
+    //     selfiePreview.src = e.target.result;
+    //     uploadZoneInner.classList.add("hidden");
+    //     previewWrap.classList.remove("hidden");
+    //   };
+    //   reader.readAsDataURL(file);
+    // }
+
+    // selfieInput.addEventListener("change", () => handleFileSelected(selfieInput.files[0]));
+
+    // changePhotoBtn.addEventListener("click", () => {
+    //   selectedFile = null;
+    //   selfieInput.value = "";
+    //   previewWrap.classList.add("hidden");
+    //   uploadZoneInner.classList.remove("hidden");
+    // });
+
+    // uploadZone.addEventListener("click", (e) => {
+    //   if (e.target.closest(".preview-wrap")) return;
+    //   selfieInput.click();
+    // });
+
+    // // Drag & Drop
+    // uploadZone.addEventListener("dragover", (e) => {
+    //   e.preventDefault();
+    //   uploadZone.classList.add("dragover");
+    // });
+
+    // uploadZone.addEventListener("dragleave", () => {
+    //   uploadZone.classList.remove("dragover");
+    // });
+
+    // uploadZone.addEventListener("drop", (e) => {
+    //   e.preventDefault();
+    //   uploadZone.classList.remove("dragover");
+    //   const file = e.dataTransfer.files[0];
+    //   handleFileSelected(file);
+    // });
+
+    // // ── FIND MY PHOTOS ────────────────────────────────────────────────
+    // const loadingMessages = [
+    //   "Detecting your face…",
+    //   "Scanning the gallery…",
+    //   "Comparing photos…",
+    //   "Almost there…",
+    // ];
+    // let loadingMsgIndex = 0;
+    // let loadingMsgTimer = null;
+
+    // function startLoadingMessages() {
+    //   loadingMsgIndex = 0;
+    //   loadingMessage.textContent = loadingMessages[0];
+    //   loadingMsgTimer = setInterval(() => {
+    //     loadingMsgIndex = (loadingMsgIndex + 1) % loadingMessages.length;
+    //     loadingMessage.textContent = loadingMessages[loadingMsgIndex];
+    //   }, 2200);
+    // }
+
+    // function stopLoadingMessages() {
+    //   clearInterval(loadingMsgTimer);
+    // }
+
+    // findBtn.addEventListener("click", async () => {
+    //   if (!selectedFile) {
+    //     showToast("Please select a selfie first.");
+    //     return;
+    //   }
+
+    //   showStep(stepLoading);
+    //   startLoadingMessages();
+
+    //   const formData = new FormData();
+    //   formData.append("selfie", selectedFile);
+
+    //   try {
+    //     // Use event-aware endpoint
+    //     const response = await fetch(`/api/event/${eventCode}/find-my-photos/`, {
+    //       method: "POST",
+    //       body: formData,
+    //     });
+
+    //     stopLoadingMessages();
+
+    //     const data = await response.json();
+
+    //     if (!data.success) {
+    //       showStep(stepError);
+    //       errorMessage.textContent = data.error || "An unknown error occurred.";
+    //       return;
+    //     }
+
+    //     if (!data.matched) {
+    //       showStep(stepNoMatch);
+    //       return;
+    //     }
+
+    //     // ── SHOW RESULTS ──
+    //     matchedPhotos = data.photos;
+    //     resultsTitle.textContent = `${data.total_photos} Photo${data.total_photos !== 1 ? "s" : ""} Found!`;
+    //     resultsDesc.textContent  = `Great news! We found ${data.total_photos} photo${data.total_photos !== 1 ? "s" : ""} of you.`;
+
+    //     // Confidence bar
+    //     const conf = data.confidence || 0;
+    //     confBar.style.width  = `${Math.min(conf, 100)}%`;
+    //     confValue.textContent = `${conf.toFixed(1)}%`;
+
+    //     // Build photo grid
+    //     photoGrid.innerHTML = "";
+    //     data.photos.forEach((filename) => {
+    //       const item = document.createElement("div");
+    //       item.className = "photo-item";
+
+    //       const img = document.createElement("img");
+    //       img.src  = `/api/event/${eventCode}/photo/${filename}/`;
+    //       img.alt  = filename;
+    //       img.loading = "lazy";
+
+    //       const overlay = document.createElement("div");
+    //       overlay.className = "photo-item-overlay";
+
+    //       const dlBtn = document.createElement("button");
+    //       dlBtn.className   = "photo-item-dl";
+    //       dlBtn.textContent = "↓ Download";
+    //       dlBtn.addEventListener("click", (e) => {
+    //         e.stopPropagation();
+    //         downloadSinglePhoto(filename);
+    //       });
+
+    //       overlay.appendChild(dlBtn);
+    //       item.appendChild(img);
+    //       item.appendChild(overlay);
+
+    //       // Click → lightbox
+    //       item.addEventListener("click", () => openLightbox(filename));
+
+    //       photoGrid.appendChild(item);
+    //     });
+
+    //     showStep(stepResults);
+
+    //   } catch (err) {
+    //     stopLoadingMessages();
+    //     showStep(stepError);
+    //     errorMessage.textContent = "Network error. Try again later.";
+    //     console.error(err);
+    //   }
+    // });
+
+    // // ── RESET ─────────────────────────────────────────────────────────
+    // function resetToUpload() {
+    //   selectedFile = null;
+    //   selfieInput.value = "";
+    //   matchedPhotos = [];
+    //   previewWrap.classList.add("hidden");
+    //   uploadZoneInner.classList.remove("hidden");
+    //   selfiePreview.src = "";
+    //   showStep(stepUpload);
+    // }
+
+    // searchAgainBtn.addEventListener("click", resetToUpload);
+    // tryAgainBtn.addEventListener("click", resetToUpload);
+    // errorRetryBtn.addEventListener("click", resetToUpload);
+
+    // // ── DOWNLOAD ALL ──────────────────────────────────────────────────
+    // downloadAllBtn.addEventListener("click", () => {
+    //   if (!matchedPhotos.length) return;
+    //   const files = matchedPhotos.join(",");
+    //   showToast("⏳ Preparing ZIP…");
+    //   window.location.href = `/api/event/${eventCode}/download-all/?files=${files}`;
+    // });
+
+    // // ── SINGLE DOWNLOAD ───────────────────────────────────────────────
+    // function downloadSinglePhoto(filename) {
+    //   const a = document.createElement("a");
+    //   a.href     = `/api/event/${eventCode}/download/${filename}/`;
+    //   a.download = filename;
+    //   document.body.appendChild(a);
+    //   a.click();
+    //   document.body.removeChild(a);
+    //   showToast("⬇ Downloading…");
+    // }
+
+    // // ── LIGHTBOX ──────────────────────────────────────────────────────
+    // function openLightbox(filename) {
+    //   lightboxImg.src     = `/api/event/${eventCode}/photo/${filename}/`;
+    //   lightboxDl.href     = `/api/event/${eventCode}/download/${filename}/`;
+    //   lightboxDl.download = filename;
+    //   lightboxFname.textContent = filename;
+    //   lightbox.classList.remove("hidden");
+    //   document.body.style.overflow = "hidden";
+    // }
+
+    // function closeLightbox() {
+    //   lightbox.classList.add("hidden");
+    //   document.body.style.overflow = "";
+    //   lightboxImg.src = "";
+    // }
+
+    // lightboxClose.addEventListener("click", closeLightbox);
+    // lightboxBg.addEventListener("click", closeLightbox);
+
+    // document.addEventListener("keydown", (e) => {
+    //   if (e.key === "Escape") closeLightbox();
+    // });
+
+    // ── STATE ─────────────────────────────────────────────────────
+    let selectedFile     = null;
+    let matchedPhotos    = [];
+    let toastTimer       = null;
+
+    // ── SECTIONS ─────────────────────────────────────────────────
+    const ALL_STEPS = [stepUpload, stepLoading, stepResults, stepNoMatch, stepError];
+
+    function showStep(step) {
+      ALL_STEPS.forEach(s => s.classList.add("hidden"));
+      step.classList.remove("hidden");
+    }
+
+    // ── TOAST ─────────────────────────────────────────────────────
+    function showToast(msg, duration = 3000) {
+      toast.textContent = msg;
+      toast.classList.remove("hidden");
+      toast.offsetHeight;
+      toast.classList.add("show");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        toast.classList.remove("show");
+        setTimeout(() => toast.classList.add("hidden"), 300);
+      }, duration);
+    }
+
+    // ── FILE SELECTION ────────────────────────────────────────────
+    function handleFileSelected(file) {
+      if (!file) return;
+      
+      const allowed = ["image/jpeg", "image/png", "image/webp", "image/bmp"];
+      if (!allowed.includes(file.type)) {
+        showToast("❌ Please upload a JPG, PNG, WebP, or BMP image.");
+        return;
+      }
+      if (file.size > 15 * 1024 * 1024) {
+        showToast("❌ File too large. Max 15 MB.");
+        return;
+      }
+
+      selectedFile = file;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        selfiePreview.src = e.target.result;
+        uploadZoneInner.classList.add("hidden");
+        previewWrap.classList.remove("hidden");
+      };
+      reader.readAsDataURL(file);
+    }
+
+    // ✅ FIXED: Proper event listener
+    selfieInput.addEventListener("change", (e) => {
+      console.log("File input changed");
+      handleFileSelected(selfieInput.files[0]);
+    }, false);  // Use capture: false
+
+    // ✅ FIXED: Properly clear selection
+    changePhotoBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log("Change photo clicked");
+      
+      selectedFile = null;
+      selfieInput.value = "";  // ✅ IMPORTANT: Clear the input
+      
+      previewWrap.classList.add("hidden");
+      uploadZoneInner.classList.remove("hidden");
+      selfiePreview.src = "";
+      
+      // Reset file input completely
+      selfieInput.type = "text";
+      selfieInput.type = "file";
+      
+    }, false);
+
+    // Click on zone → open file picker
+    uploadZone.addEventListener("click", (e) => {
+      if (e.target.closest(".preview-wrap")) return;
+      if (e.target.closest("label")) return;
+      console.log("Upload zone clicked");
+      selfieInput.click();
+    }, false);
+
+    // Drag & Drop
+    uploadZone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      uploadZone.classList.add("dragover");
+    }, false);
+
+    uploadZone.addEventListener("dragleave", () => {
+      uploadZone.classList.remove("dragover");
+    }, false);
+
+    uploadZone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      uploadZone.classList.remove("dragover");
+      const file = e.dataTransfer.files[0];
+      handleFileSelected(file);
+    }, false);
+
+    // ── FIND MY PHOTOS ────────────────────────────────────────────
+    const loadingMessages = [
+      "Detecting your face…",
+      "Scanning the gallery…",
+      "Comparing photos…",
+      "Almost there…",
+    ];
+    let loadingMsgIndex = 0;
+    let loadingMsgTimer = null;
+
+    function startLoadingMessages() {
+      loadingMsgIndex = 0;
+      loadingMessage.textContent = loadingMessages[0];
+      loadingMsgTimer = setInterval(() => {
+        loadingMsgIndex = (loadingMsgIndex + 1) % loadingMessages.length;
+        loadingMessage.textContent = loadingMessages[loadingMsgIndex];
+      }, 2200);
+    }
+
+    function stopLoadingMessages() {
+      clearInterval(loadingMsgTimer);
+    }
+
+    findBtn.addEventListener("click", async () => {
+      if (!selectedFile) {
+        showToast("Please select a selfie first.");
+        return;
+      }
+
+      console.log("Find button clicked, file:", selectedFile.name);
+      showStep(stepLoading);
+      startLoadingMessages();
+
+      const formData = new FormData();
+      formData.append("selfie", selectedFile);
+
+      try {
+        const response = await fetch(`/api/event/${eventCode}/find-my-photos/`, {
+          method: "POST",
+          body: formData,
+        });
+
+        stopLoadingMessages();
+
+        const data = await response.json();
+        
+        console.log("Response:", data);
+
+        if (!data.success) {
+          showStep(stepError);
+          errorMessage.textContent = data.error || "An unknown error occurred.";
+          return;
+        }
+
+        if (!data.matched) {
+          showStep(stepNoMatch);
+          return;
+        }
+
+        // ── SHOW RESULTS ──
+        matchedPhotos = data.photos;
+        resultsTitle.textContent = `${data.total_photos} Photo${data.total_photos !== 1 ? "s" : ""} Found!`;
+        resultsDesc.textContent  = `Great news! We found ${data.total_photos} photo${data.total_photos !== 1 ? "s" : ""} of you.`;
+
+        // Confidence bar
+        const conf = data.confidence || 0;
+        confBar.style.width  = `${Math.min(conf, 100)}%`;
+        confValue.textContent = `${conf.toFixed(1)}%`;
+
+        // Build photo grid
+        photoGrid.innerHTML = "";
+        data.photos.forEach((filename) => {
+          const item = document.createElement("div");
+          item.className = "photo-item";
+
+          const img = document.createElement("img");
+          img.src  = `/api/event/${eventCode}/photo/${filename}/`;
+          img.alt  = filename;
+          img.loading = "lazy";
+
+          const overlay = document.createElement("div");
+          overlay.className = "photo-item-overlay";
+
+          const dlBtn = document.createElement("button");
+          dlBtn.className   = "photo-item-dl";
+          dlBtn.textContent = "↓ Download";
+          dlBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            downloadSinglePhoto(filename);
+          });
+
+          overlay.appendChild(dlBtn);
+          item.appendChild(img);
+          item.appendChild(overlay);
+
+          // Click → lightbox
+          item.addEventListener("click", () => openLightbox(filename));
+
+          photoGrid.appendChild(item);
+        });
+
+        showStep(stepResults);
+
+      } catch (err) {
+        stopLoadingMessages();
+        showStep(stepError);
+        errorMessage.textContent = "Network error. Try again later.";
+        console.error("Fetch error:", err);
+      }
+    }, false);
+
+    // ── RESET ─────────────────────────────────────────────────────
+    function resetToUpload() {
+      console.log("Resetting to upload");
+      selectedFile = null;
+      selfieInput.value = "";
+      matchedPhotos = [];
+      previewWrap.classList.add("hidden");
+      uploadZoneInner.classList.remove("hidden");
+      selfiePreview.src = "";
+      
+      // Reset file input
+      selfieInput.type = "text";
+      selfieInput.type = "file";
+      
+      showStep(stepUpload);
+    }
+
+    searchAgainBtn.addEventListener("click", resetToUpload, false);
+    tryAgainBtn.addEventListener("click", resetToUpload, false);
+    errorRetryBtn.addEventListener("click", resetToUpload, false);
+
+    // ── DOWNLOAD ALL ──────────────────────────────────────────────
+    downloadAllBtn.addEventListener("click", () => {
+      if (!matchedPhotos.length) return;
+      const files = matchedPhotos.join(",");
+      showToast("⏳ Preparing ZIP…");
+      window.location.href = `/api/event/${eventCode}/download-all/?files=${files}`;
+    }, false);
+
+    // ── SINGLE DOWNLOAD ───────────────────────────────────────────
+    function downloadSinglePhoto(filename) {
+      const a = document.createElement("a");
+      a.href     = `/api/event/${eventCode}/download/${filename}/`;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      showToast("⬇ Downloading…");
+    }
+
+    // ── LIGHTBOX ──────────────────────────────────────────────────
+    function openLightbox(filename) {
+      lightboxImg.src     = `/api/event/${eventCode}/photo/${filename}/`;
+      lightboxDl.href     = `/api/event/${eventCode}/download/${filename}/`;
+      lightboxDl.download = filename;
+      lightboxFname.textContent = filename;
+      lightbox.classList.remove("hidden");
+      document.body.style.overflow = "hidden";
+    }
+
+    function closeLightbox() {
+      lightbox.classList.add("hidden");
+      document.body.style.overflow = "";
+      lightboxImg.src = "";
+    }
+
+    lightboxClose.addEventListener("click", closeLightbox, false);
+    lightboxBg.addEventListener("click", closeLightbox, false);
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeLightbox();
+    });
+
+    // ── INIT ──────────────────────────────────────────────────────
+    console.log("Event Guest Page Initialized");
+    showStep(stepUpload);
+
+    // ── INIT ──────────────────────────────────────────────────────────
+    showStep(stepUpload);
+  </script>
+</body>
+</html>
