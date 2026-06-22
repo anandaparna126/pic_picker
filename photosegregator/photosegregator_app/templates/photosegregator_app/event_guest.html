@@ -595,7 +595,8 @@
         }
 
         // ── SHOW RESULTS ──
-        matchedPhotos = data.photos;
+        // matchedPhotos = data.photos;
+        matchedPhotos = data.matched_photos.map(p => p.filename);
         resultsTitle.textContent = `${data.total_photos} Photo${data.total_photos !== 1 ? "s" : ""} Found!`;
         resultsDesc.textContent  = `Great news! We found ${data.total_photos} photo${data.total_photos !== 1 ? "s" : ""} of you.`;
 
@@ -606,7 +607,8 @@
 
         // Build photo grid
         photoGrid.innerHTML = "";
-        data.photos.forEach((filename) => {
+        // data.photos.forEach((filename) => {
+        matchedPhotos.forEach((filename) => {
           const item = document.createElement("div");
           item.className = "photo-item";
 
