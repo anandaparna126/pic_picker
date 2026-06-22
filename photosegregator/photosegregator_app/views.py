@@ -136,7 +136,8 @@ def event_details(request, event_code):
     
     # Build the event guest link
     request_host = request.get_host()
-    guest_link = f"http://{request_host}/event/{event_code}/"
+    # guest_link = f"http://{request_host}/event/{event_code}/"
+    guest_link = f"http://{request_host}/event/{event_code}/guest/"
     
     print(f"[DEBUG] Guest link: {guest_link}")
     

@@ -223,7 +223,8 @@
           
           // Redirect to event details page
           setTimeout(() => {
-            window.location.href = `/event/${data.event_code}/details/`;
+            // window.location.href = `/event/${data.event_code}/details/`;
+            window.location.href = `/event/${data.event_code}/`;
           }, 1000);
         } else {
           showToast("❌ Error: " + (data.error || "Unknown error"));
