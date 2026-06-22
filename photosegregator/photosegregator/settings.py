@@ -84,6 +84,7 @@ ROOT_URLCONF = "photosegregator.urls"
 #         },
 #     },
 # ]
+
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
@@ -173,8 +174,8 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # ════════════════════════════════════════════════════════════════
  
 # R12 Server - Photo Gallery Storage
-GALLERY_BASE_URL = "http://182.70.253.15/gallery_images"
-GALLERY_LIST_PHP = "http://182.70.253.15/gallery_images/list.php"
+GALLERY_BASE_URL = "http://182.70.253.15:8080/gallery_images"
+GALLERY_LIST_PHP = "http://182.70.253.15:8080/gallery_images/list.php"
  
 # Add 'requests' to required packages
 # pip install requests
