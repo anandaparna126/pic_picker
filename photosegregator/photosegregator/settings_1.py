@@ -168,14 +168,6 @@ MEDIA_ROOT = BASE_DIR / 'media'
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
-# ════════════════════════════════════════════════════════════════
-# ══ R12 SERVER CONFIGURATION (Add to your settings.py)
-# ════════════════════════════════════════════════════════════════
- 
-# R12 Server - Photo Gallery Storage
-GALLERY_BASE_URL = "http://182.70.253.15/gallery_images"
-GALLERY_LIST_PHP = "http://182.70.253.15/gallery_images/list.php"
- 
-# Add 'requests' to required packages
-# pip install requests
- 
+GALLERY_BASE_URL = "http://R12_SERVER_IP/gallery_images"  # R12 ka IP
+GALLERY_BASE_PATH = None  # Local path nahi use karenge
+

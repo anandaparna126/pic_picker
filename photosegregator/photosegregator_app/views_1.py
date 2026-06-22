@@ -5,10 +5,9 @@ import zipfile
 import tempfile
 import base64
 import numpy as np
-import requests
 from io import BytesIO
 from django.shortcuts import render, get_object_or_404
-from django.http import JsonResponse, FileResponse, HttpResponseBadRequest, StreamingHttpResponse
+from django.http import JsonResponse, FileResponse, HttpResponseBadRequest
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
@@ -34,88 +33,6 @@ try:
     SCIPY_AVAILABLE = True
 except ImportError:
     SCIPY_AVAILABLE = False
-
-
-# ════════════════════════════════════════════════════════════════════════════
-# ══ R12 SERVER HELPER FUNCTIONS
-# ════════════════════════════════════════════════════════════════════════════
-
-def _get_gallery_images_from_r12(event_code):
-    """
-    Fetch image list from R12 server using list.php
-    
-    Args:
-        event_code: Event code to fetch images for
-    
-    Returns:
-        List of image filenames or empty list on error
-    """
-    try:
-        list_url = f"{settings.GALLERY_LIST_PHP}?event={event_code}"
-        print(f"[R12] Fetching image list from: {list_url}")
-        
-        response = requests.get(list_url, timeout=10)
-        
-        if response.status_code == 200:
-            images = response.json()
-            print(f"[R12] ✅ Got {len(images)} images from R12")
-            return images
-        else:
-            print(f"[R12] ❌ HTTP {response.status_code}")
-            return []
-    
-    except requests.exceptions.Timeout:
-        print(f"[R12] ❌ Timeout connecting to R12 server")
-        return []
-    except requests.exceptions.ConnectionError:
-        print(f"[R12] ❌ Cannot connect to R12 server")
-        return []
-    except json.JSONDecodeError:
-        print(f"[R12] ❌ Invalid JSON response from R12")
-        return []
-    except Exception as e:
-        print(f"[R12] ❌ Error: {e}")
-        return []
-
-
-def _download_image_from_r12(event_code, filename):
-    """
-    Download image from R12 server and save to temp location
-    
-    Args:
-        event_code: Event code
-        filename: Image filename
-    
-    Returns:
-        Temp file path or None on error
-    """
-    try:
-        image_url = f"{settings.GALLERY_BASE_URL}/{event_code}/{filename}"
-        print(f"[R12] Downloading: {image_url}")
-        
-        response = requests.get(image_url, timeout=10)
-        
-        if response.status_code == 200:
-            # Save to temp file
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp:
-                tmp.write(response.content)
-                temp_path = tmp.name
-            
-            print(f"[R12] ✅ Downloaded {filename} to {temp_path}")
-            return temp_path
-        else:
-            print(f"[R12] ❌ HTTP {response.status_code} for {filename}")
-            return None
-    
-    except requests.exceptions.Timeout:
-        print(f"[R12] ❌ Timeout downloading {filename}")
-        return None
-    except requests.exceptions.ConnectionError:
-        print(f"[R12] ❌ Cannot connect to R12 for {filename}")
-        return None
-    except Exception as e:
-        print(f"[R12] ❌ Error downloading {filename}: {e}")
-        return None
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -247,7 +164,7 @@ def api_create_event(request):
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# ══ ROBUST FACE DETECTION & MATCHING
+# ══ ROBUST FACE DETECTION & MATCHING (PEHLE WALE LOGIC SE INSPIRED)
 # ════════════════════════════════════════════════════════════════════════════
 
 def _get_face_embedding(image_path, detectors=None):
@@ -312,7 +229,7 @@ def _calculate_cosine_similarity(embedding1, embedding2):
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# ══ API: PHOTO FINDING (EVENT-AWARE) - WITH R12 INTEGRATION
+# ══ API: PHOTO FINDING (EVENT-AWARE) - MAIN FUNCTION
 # ════════════════════════════════════════════════════════════════════════════
 
 @csrf_exempt
@@ -321,14 +238,13 @@ def api_find_my_photos_event(request, event_code):
     """
     POST /api/event/{event_code}/find-my-photos/
     
-    Find all photos matching a person's face in the event gallery on R12 server.
+    Find all photos matching a person's face in the event gallery.
     
     Uses:
     ✅ DeepFace ArcFace (512-dim embeddings)
     ✅ Multiple detector backends (retinaface, mtcnn, mediapipe, ssd, dlib)
     ✅ Cosine similarity (better than euclidean for face embeddings)
     ✅ Adaptive threshold based on top matches
-    ✅ R12 Server integration for photo storage
     
     Request:
     - Multipart form with 'selfie' file
@@ -340,6 +256,7 @@ def api_find_my_photos_event(request, event_code):
         'total_photos': N,
         'confidence': 0-100,
         'person_label': 'detected_person',
+        'photos': ['file1.jpg', 'file2.jpg', ...],
         'matched_photos': [{'filename': 'x.jpg', 'score': 75.3}, ...]
     }
     """
@@ -383,7 +300,6 @@ def api_find_my_photos_event(request, event_code):
     
     selfie_file = request.FILES['selfie']
     selfie_path = None
-    downloaded_images = []  # Track temp files for cleanup
     
     try:
         # ════════════════════════════════════════════════════════════════
@@ -397,6 +313,37 @@ def api_find_my_photos_event(request, event_code):
             selfie_path = tmp.name
         
         print(f"📷 Selfie saved to: {selfie_path}")
+        
+        # Get gallery path
+        gallery_path = os.path.join(settings.BASE_DIR, event.gallery_path)
+        print(f"📁 Gallery path: {gallery_path}")
+        
+        # Check if gallery exists
+        if not os.path.exists(gallery_path):
+            print(f"❌ Gallery folder not found")
+            return JsonResponse({
+                'success': True,
+                'matched': False,
+                'message': 'Gallery folder not found. Please upload photos first.'
+            })
+        
+        # Get all images
+        valid_extensions = ('.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif')
+        images = sorted([
+            f for f in os.listdir(gallery_path)
+            if f.lower().endswith(valid_extensions) 
+            and os.path.isfile(os.path.join(gallery_path, f))
+        ])
+        
+        print(f"✅ Gallery exists")
+        print(f"📸 Found {len(images)} images in gallery\n")
+        
+        if not images:
+            return JsonResponse({
+                'success': True,
+                'matched': False,
+                'message': 'No images in gallery'
+            })
         
         # ════════════════════════════════════════════════════════════════
         # STEP 1: Get selfie embedding
@@ -415,46 +362,21 @@ def api_find_my_photos_event(request, event_code):
         print(f"✅ Selfie embedding generated (size: {len(selfie_embedding)})\n")
         
         # ════════════════════════════════════════════════════════════════
-        # STEP 2: Get image list from R12 server
+        # STEP 2: Compare with ALL gallery images
         # ════════════════════════════════════════════════════════════════
         
-        print(f"Step 2️⃣  : Fetching image list from R12 server...")
-        images = _get_gallery_images_from_r12(event_code)
-        
-        if not images:
-            print("⚠️  No images found on R12 server")
-            return JsonResponse({
-                'success': True,
-                'matched': False,
-                'message': 'No images in gallery. Please upload photos first.'
-            })
-        
-        print(f"✅ Got {len(images)} images from R12\n")
-        
-        # ════════════════════════════════════════════════════════════════
-        # STEP 3: Download and compare with ALL gallery images
-        # ════════════════════════════════════════════════════════════════
-        
-        print(f"Step 3️⃣  : Comparing with {len(images)} gallery images...")
+        print(f"Step 2️⃣  : Comparing with {len(images)} gallery images...")
         all_scores = []  # Track all scores for adaptive threshold
         
         for idx, img_file in enumerate(images, 1):
-            # Download image from R12
-            img_temp_path = _download_image_from_r12(event_code, img_file)
-            
-            if img_temp_path is None:
-                print(f"  ⚠️  {img_file}: Could not download")
-                continue
-            
-            downloaded_images.append(img_temp_path)
+            img_path = os.path.join(gallery_path, img_file)
             
             try:
                 # Get gallery image embedding
-                gallery_embedding = _get_face_embedding(img_temp_path)
+                gallery_embedding = _get_face_embedding(img_path)
                 
                 if gallery_embedding is None:
                     # Skip images without detectable faces
-                    print(f"  ⚠️  {img_file}: No face detected")
                     continue
                 
                 # Calculate similarity
@@ -480,7 +402,7 @@ def api_find_my_photos_event(request, event_code):
         print(f"\nTotal images with detectable faces: {len(all_scores)}")
         
         # ════════════════════════════════════════════════════════════════
-        # STEP 4: Smart threshold - take top matches AND anything above 40%
+        # STEP 3: Smart threshold - take top matches AND anything above 40%
         # ════════════════════════════════════════════════════════════════
         
         if not all_scores:
@@ -527,6 +449,7 @@ def api_find_my_photos_event(request, event_code):
         # Return matches
         scores = [f[1] for f in matched_photos]
         avg_confidence = np.mean(scores) if scores else 0
+        photo_filenames = [f[0] for f in matched_photos]
         
         return JsonResponse({
             'success': True,
@@ -535,6 +458,7 @@ def api_find_my_photos_event(request, event_code):
             'total_photos': len(matched_photos),
             'confidence': round(avg_confidence, 1),
             'person_label': 'detected_person',
+            'photos': photo_filenames,
             'matched_photos': [
                 {
                     'filename': f[0],
@@ -554,33 +478,21 @@ def api_find_my_photos_event(request, event_code):
         }, status=500)
     
     finally:
-        # Cleanup temp files
+        # Cleanup temp file
         try:
             if selfie_path and os.path.exists(selfie_path):
                 os.remove(selfie_path)
+                print("🧹 Temp file cleaned up")
         except:
             pass
-        
-        for img_path in downloaded_images:
-            try:
-                if img_path and os.path.exists(img_path):
-                    os.remove(img_path)
-            except:
-                pass
-        
-        print("🧹 Temp files cleaned up")
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# ══ API: PHOTO SERVING (Proxy from R12)
+# ══ API: PHOTO SERVING
 # ════════════════════════════════════════════════════════════════════════════
 
-@require_http_methods(["GET"])
 def api_serve_photo_event(request, event_code, filename):
-    """GET /api/event/{event_code}/photo/{filename}/
-    
-    Proxy photo from R12 server to client
-    """
+    """GET /api/event/{event_code}/photo/{filename}/"""
     print(f"[DEBUG] Serving photo {filename} from event {event_code}")
     
     try:
@@ -592,42 +504,25 @@ def api_serve_photo_event(request, event_code, filename):
     if '/' in filename or '\\' in filename or '..' in filename:
         return HttpResponseBadRequest("Invalid filename")
     
-    try:
-        photo_url = f"{settings.GALLERY_BASE_URL}/{event_code}/{filename}"
-        print(f"[R12] Proxying: {photo_url}")
-        
-        response = requests.get(photo_url, stream=True, timeout=10)
-        
-        if response.status_code == 200:
-            return StreamingHttpResponse(
-                response.iter_content(chunk_size=8192),
-                content_type=response.headers.get('content-type', 'image/jpeg')
-            )
-        else:
-            print(f"[R12] ❌ HTTP {response.status_code}")
-            return HttpResponseBadRequest("Photo not found")
+    photo_path = os.path.join(settings.BASE_DIR, event.gallery_path, filename)
     
-    except requests.exceptions.Timeout:
-        print(f"[R12] ❌ Timeout")
-        return HttpResponseBadRequest("R12 server timeout")
-    except requests.exceptions.ConnectionError:
-        print(f"[R12] ❌ Connection error")
-        return HttpResponseBadRequest("Cannot connect to R12 server")
+    if not os.path.exists(photo_path):
+        print(f"[ERROR] Photo not found: {photo_path}")
+        return HttpResponseBadRequest("Photo not found")
+    
+    try:
+        return FileResponse(open(photo_path, 'rb'), content_type='image/jpeg')
     except Exception as e:
-        print(f"[ERROR] {e}")
+        print(f"[ERROR] Error serving photo: {e}")
         return HttpResponseBadRequest("Could not serve photo")
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# ══ API: PHOTO DOWNLOAD (Single)
+# ══ API: PHOTO DOWNLOADS
 # ════════════════════════════════════════════════════════════════════════════
 
-@require_http_methods(["GET"])
 def api_download_photo_event(request, event_code, filename):
-    """GET /api/event/{event_code}/download/{filename}/
-    
-    Download single photo from R12 server
-    """
+    """GET /api/event/{event_code}/download/{filename}/"""
     print(f"[DEBUG] Downloading photo {filename} from event {event_code}")
     
     try:
@@ -639,30 +534,23 @@ def api_download_photo_event(request, event_code, filename):
     if '/' in filename or '\\' in filename or '..' in filename:
         return HttpResponseBadRequest("Invalid filename")
     
-    try:
-        photo_url = f"{settings.GALLERY_BASE_URL}/{event_code}/{filename}"
-        response = requests.get(photo_url, timeout=10)
-        
-        if response.status_code == 200:
-            return FileResponse(
-                BytesIO(response.content),
-                as_attachment=True,
-                filename=filename,
-                content_type='image/jpeg'
-            )
-        else:
-            return HttpResponseBadRequest("Photo not found")
+    photo_path = os.path.join(settings.BASE_DIR, event.gallery_path, filename)
     
+    if not os.path.exists(photo_path):
+        return HttpResponseBadRequest("Photo not found")
+    
+    try:
+        return FileResponse(
+            open(photo_path, 'rb'),
+            as_attachment=True,
+            filename=filename,
+            content_type='image/jpeg'
+        )
     except Exception as e:
-        print(f"[ERROR] {e}")
+        print(f"[ERROR] Error downloading photo: {e}")
         return HttpResponseBadRequest("Could not download photo")
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# ══ API: PHOTO DOWNLOAD (Multiple as ZIP)
-# ════════════════════════════════════════════════════════════════════════════
-
-@require_http_methods(["GET"])
 def api_download_all_photos_event(request, event_code):
     """GET /api/event/{event_code}/download-all/?files=file1.jpg,file2.jpg"""
     print(f"[DEBUG] Downloading all photos from event {event_code}")
@@ -673,6 +561,7 @@ def api_download_all_photos_event(request, event_code):
         return JsonResponse({'error': 'Event not found'}, status=404)
     
     filenames = request.GET.get('files', '').split(',')
+    gallery_path = os.path.join(settings.BASE_DIR, event.gallery_path)
     
     try:
         # Create zip
@@ -685,16 +574,11 @@ def api_download_all_photos_event(request, event_code):
                 if not filename or '/' in filename or '\\' in filename or '..' in filename:
                     continue
                 
-                try:
-                    photo_url = f"{settings.GALLERY_BASE_URL}/{event_code}/{filename}"
-                    response = requests.get(photo_url, timeout=10)
-                    
-                    if response.status_code == 200:
-                        zf.writestr(filename, response.content)
-                        print(f"[DEBUG] Added to ZIP: {filename}")
-                except Exception as e:
-                    print(f"[WARNING] Could not add {filename}: {e}")
-                    continue
+                photo_path = os.path.join(gallery_path, filename)
+                
+                if os.path.exists(photo_path):
+                    zf.write(photo_path, arcname=filename)
+                    print(f"[DEBUG] Added to ZIP: {filename}")
         
         zip_buffer.seek(0)
         return FileResponse(
