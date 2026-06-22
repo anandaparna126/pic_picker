@@ -14,6 +14,37 @@ from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
 from .models import Event
 
+import hashlib
+
+# ── EMBEDDING CACHE ──────────────────────────────────────────────
+# Cache: {event_code: {filename: {"embedding": [...], "hash": "..."}}}
+_embedding_cache = {}
+
+def _get_file_hash(file_path):
+    """Get MD5 hash of file for cache invalidation"""
+    with open(file_path, 'rb') as f:
+        return hashlib.md5(f.read()).hexdigest()
+
+def _get_cached_embedding(event_code, filename, file_path):
+    """Return cached embedding if exists, else None"""
+    cache = _embedding_cache.get(event_code, {})
+    entry = cache.get(filename)
+    if entry:
+        file_hash = _get_file_hash(file_path)
+        if entry.get('hash') == file_hash:
+            print(f"  💾 {filename}: Using cached embedding")
+            return np.array(entry['embedding'])
+    return None
+
+def _store_cached_embedding(event_code, filename, file_path, embedding):
+    """Store embedding in cache"""
+    if event_code not in _embedding_cache:
+        _embedding_cache[event_code] = {}
+    _embedding_cache[event_code][filename] = {
+        'embedding': embedding.tolist(),
+        'hash': _get_file_hash(file_path)
+    }
+
 # ── FACE DETECTION (install: pip install deepface) ───────────────
 try:
     from deepface import DeepFace
@@ -451,7 +482,12 @@ def api_find_my_photos_event(request, event_code):
             
             try:
                 # Get gallery image embedding
-                gallery_embedding = _get_face_embedding(img_temp_path)
+                # gallery_embedding = _get_face_embedding(img_temp_path)
+                gallery_embedding = _get_cached_embedding(event_code, img_file, img_temp_path)
+                if gallery_embedding is None:
+                    gallery_embedding = _get_face_embedding(img_temp_path)
+                    if gallery_embedding is not None:
+                        _store_cached_embedding(event_code, img_file, img_temp_path, gallery_embedding)
                 
                 if gallery_embedding is None:
                     # Skip images without detectable faces
